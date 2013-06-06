@@ -103,7 +103,7 @@ let b:errormsg = ''
 
 " script variables            {{{1
 let s:cache = {}  " FQN -> member list, e.g. {'java.lang.StringBuffer': classinfo, 'java.util': packageinfo, '/dir/TopLevelClass.java': compilationUnit}
-let s:files = {}  " srouce file path -> properties, e.g. {filekey: {'unit': compilationUnit, 'changedtick': tick, }}
+let s:files = {}  " source file path -> properties, e.g. {filekey: {'unit': compilationUnit, 'changedtick': tick, }}
 let s:history = {}  " 
 
 
@@ -1670,6 +1670,8 @@ fu! s:GetSourceDirs(filepath, ...)
     if packageName != ''
       let path = fnamemodify(substitute(filepath, packageName, '', 'g'), ':p:h')
       if index(dirs, path) < 0
+        let path = s:ConvertToJavaPath(path)
+
         call add(dirs, path)
       endif
     endif
@@ -1758,10 +1760,11 @@ fu! s:GetJavaCompleteClassPath()
   if classfile == ''
     " try to find source file and compile to $HOME
     let srcfile = globpath(&rtp, 'autoload/Reflection.java')
-    let classdir = fnamemodify(srcfile, ':h')
+    let srcfile = s:ConvertToJavaPath(srcfile)
+    let classdir = s:ConvertToJavaPath(fnamemodify(srcfile, ':h'))
 
     if srcfile != ''
-      exe '!' . javacomplete#GetCompiler() . ' -d "' . classdir . '" "' . srcfile . '"'
+      let result = s:System(javacomplete#GetCompiler() . ' -d ' . shellescape(classdir) . ' ' . shellescape(srcfile), "GetJavaCompleteClassPath")
       let classfile = globpath(&rtp, 'autoload/Reflection.class')
       if classfile == ''
         echo srcfile . ' can not be compiled. Please check it'
@@ -1843,6 +1846,22 @@ endfu
 fu! s:fnamecanonize(fname, mods)
   return fnamemodify(a:fname, a:mods . ':gs?[\\/]\+?/?')
 endfu
+
+" Convert a path into the form that java expects on this platform
+" Really only needed for running windows java from cygwin
+fu! s:ConvertToJavaPath(path)
+  if has('win32unix')
+    if ! exists('s:windows_java_under_unix')
+      let s:windows_java_under_unix = match(s:System("which " . shellescape(javacomplete#GetJVMLauncher()), "ConvertToJavaPath"), "^/cygdrive") >= 0
+    endif
+    if s:windows_java_under_unix
+      return substitute(s:System("cygpath --windows " . shellescape(a:path), "ConvertToJavaPath"), "\n", "", "")
+    endif
+  else
+    return a:path
+  endif
+endfu
+
 
 " Similar with filter(), but returns a new list instead of operating in-place.
 " `item` has the value of the current item.
@@ -2166,7 +2185,7 @@ endfu
 fu! s:RunReflection(option, args, log)
   let classpath = ''
   if !exists('s:isjdk11')
-    let classpath = ' -classpath "' . s:GetClassPath() . '" '
+    let classpath = ' -classpath "' . s:ConvertToJavaPath(s:GetClassPath()) . '" '
   endif
 
   let cmd = javacomplete#GetJVMLauncher() . classpath . ' Reflection ' . a:option . ' "' . a:args . '"'
